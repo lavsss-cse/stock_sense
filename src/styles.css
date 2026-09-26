@@ -325,3 +325,49 @@ table tbody tr:hover { background: color-mix(in srgb, var(--sage-100) 78%, trans
   .metric-card strong { font-size: 26px; }
   .table-wrap td { font-size: 13px; }
 }
+
+/* Final responsive guardrails for narrow laptops, tablets, and touch screens. */
+.sidebar { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(208,235,199,.24) transparent; }
+.sidebar::-webkit-scrollbar { width: 5px; }
+.sidebar::-webkit-scrollbar-thumb { border-radius: 99px; background: rgba(208,235,199,.24); }
+.sidebar-status, .sidebar-profile { flex-shrink: 0; }
+.topbar-actions { min-width: 0; }
+.quick-find { min-width: 0; }
+.breadcrumb { min-width: 0; }
+.breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editorial-actions .btn { white-space: nowrap; }
+.panel-heading > * { min-width: 0; }
+
+@media (max-width: 1180px) and (min-width: 1001px) {
+  :root { --sidebar: 248px; }
+  .sidebar { padding-inline: 15px; }
+  .topbar { padding-inline: 26px; }
+  .content { padding-inline: 26px; }
+  .app-footer { padding-inline: 26px; }
+  .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .topbar-left { min-width: 0; }
+  .topbar-actions { flex: 1; justify-content: flex-end; }
+  .breadcrumb { max-width: 42vw; }
+  .editorial-copy p { font-size: 14px; }
+  .results-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .table-wrap { border: 0; overflow: visible; }
+  .table-wrap:not(.responsive-table) { overflow-x: auto; border: 1px solid var(--border); }
+  .table-wrap:not(.responsive-table) table { min-width: 600px; }
+}
+
+@media (max-width: 420px) {
+  .topbar { padding-inline: 10px; }
+  .content { padding-inline: 10px; }
+  .editorial-header { padding: 22px 18px; }
+  .editorial-copy h1 { font-size: 34px; }
+  .editorial-actions { gap: 7px; }
+  .editorial-actions .btn { padding-inline: 11px; font-size: 12px; }
+  .page-panel, .recent-panel, .progress-panel, .quick-actions, .attention-panel { padding: 14px; }
+  .filter-group { grid-template-columns: 1fr; }
+  .notification-panel { right: -8px; }
+}
