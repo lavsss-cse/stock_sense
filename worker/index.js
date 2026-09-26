@@ -1,6 +1,6 @@
 import page from 'virtual:stocksense-html';
 import favicon from 'virtual:stocksense-favicon';
-import { LoginSchema, OperationWriteSchema, StateWriteSchema, zodMessage } from '../src/domain.js';
+import { LoginSchema, OperationWriteSchema, OtpRequestSchema, StateWriteSchema, zodMessage } from '../src/domain.js';
 import { InventoryError, saveOperation } from '../src/inventory.js';
 import { seedState } from '../src/store.js';
 
@@ -55,6 +55,11 @@ async function api(request, env, path) {
     const forwardedEmail = request.headers.get('oai-authenticated-user-email') || parsed.data.email;
     await env.DB.prepare('INSERT INTO sessions (token, user_id, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').bind(token, forwardedId, forwardedEmail.toLowerCase(), createdAt.toISOString(), expiresAt.toISOString()).run();
     return json({ token, expiresAt: expiresAt.toISOString(), user: { name: userName(request, { email: forwardedEmail }), email: forwardedEmail, role: 'Inventory Manager', workspace: 'Arbor & Co.' } });
+  }
+  if (path === '/api/auth/request-otp' && request.method === 'POST') {
+    const parsed = OtpRequestSchema.safeParse(await body(request));
+    if (!parsed.success) return json({ message: zodMessage(parsed.error), details: parsed.error.flatten() }, 400);
+    return json({ sent: true, prototypeOtp: '482913', expiresInSeconds: 600 });
   }
   const session = await requireSession(request, env);
   if (path === '/api/auth/logout' && request.method === 'POST') {

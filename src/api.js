@@ -29,6 +29,9 @@ export const api = {
     const credentials = LoginSchema.parse({ email, password });
     return request('/api/auth/login', { method: 'POST', body: JSON.stringify(credentials) });
   },
+  requestOtp(email) {
+    return request('/api/auth/request-otp', { method: 'POST', body: JSON.stringify({ email }) });
+  },
   logout() {
     return request('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
   },

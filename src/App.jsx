@@ -126,13 +126,26 @@ function Login({ onLogin, theme, toggleTheme }) {
 
 function AuthMiniModal({ type, onClose }) {
   const [sent, setSent] = useState(false);
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const isReset = type === 'reset';
+  async function submit(event) {
+    event.preventDefault();
+    const value = email.trim();
+    if (!value.includes('@')) { setError('Enter a valid work email.'); return; }
+    setError(''); setLoading(true);
+    try { await api.requestOtp(value); setSent(true); }
+    catch (requestError) { setError(requestError.message || 'We could not send the verification code.'); }
+    finally { setLoading(false); }
+  }
   return <Modal title={sent ? 'Check your inbox' : isReset ? 'Reset your password' : 'Create your account'} subtitle={sent ? 'A six-digit verification code has been generated for this prototype.' : isReset ? 'We will send a one-time password to your email.' : 'Set up a secure Inventory Manager profile.'} onClose={onClose}>
-    {sent ? <div className="success-state"><span><Check size={24} /></span><h3>Verification code: 482 913</h3><p>Use this demo OTP to continue. In production, this would be delivered securely.</p><button className="btn primary" onClick={onClose}>Return to sign in</button></div> : <form onSubmit={(e) => { e.preventDefault(); setSent(true); }} className="form-stack">
+    {sent ? <div className="success-state"><span><Check size={24} /></span><h3>Verification code: 482 913</h3><p>Use this demo OTP to continue. In production, this would be delivered securely.</p><button className="btn primary" onClick={onClose}>Return to sign in</button></div> : <form onSubmit={submit} className="form-stack">
       {!isReset && <label>Full name<input required placeholder="e.g. Maya Chen" /></label>}
-      <label>Work email<input required type="email" placeholder="you@company.com" /></label>
+      <label>Work email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" /></label>
       {!isReset && <label>Company name<input required placeholder="Your organization" /></label>}
-      <div className="modal-actions"><button type="button" className="btn secondary" onClick={onClose}>Cancel</button><button className="btn primary">{isReset ? 'Send OTP' : 'Create account'}</button></div>
+      {error && <div className="form-alert danger"><AlertTriangle size={17} />{error}</div>}
+      <div className="modal-actions"><button type="button" className="btn secondary" onClick={onClose}>Cancel</button><button className="btn primary" disabled={loading}>{loading ? <><LoaderCircle className="spin" size={17} />Sending…</> : isReset ? 'Send OTP' : 'Create account'}</button></div>
     </form>}
   </Modal>;
 }
@@ -140,6 +153,7 @@ function AuthMiniModal({ type, onClose }) {
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [authenticated, setAuthenticated] = useState(() => sessionStorage.getItem('stocksense-session') === 'active' && Boolean(sessionStorage.getItem('stocksense-token')));
+  const [user, setUser] = useState(() => { try { return JSON.parse(sessionStorage.getItem('stocksense-user')) || { name: 'Maya Chen', email: 'manager@stocksense.demo', role: 'Inventory Manager', workspace: 'Arbor & Co.' }; } catch { return { name: 'Maya Chen', email: 'manager@stocksense.demo', role: 'Inventory Manager', workspace: 'Arbor & Co.' }; } });
   const [state, setState] = useState(loadState);
   const [page, setPage] = useState('dashboard');
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'light');
@@ -257,10 +271,12 @@ export default function App() {
   async function login(email, password) {
     const data = await api.login(email, password);
     sessionStorage.setItem('stocksense-token', data.token);
+    sessionStorage.setItem('stocksense-user', JSON.stringify(data.user));
+    setUser(data.user);
     setBackendOnline(true);
     sessionStorage.setItem('stocksense-session', 'active'); setAuthenticated(true); setBooting(true); setTimeout(() => setBooting(false), 700);
   }
-  function logout() { void api.logout(); sessionStorage.removeItem('stocksense-session'); sessionStorage.removeItem('stocksense-token'); setAuthenticated(false); setPage('dashboard'); }
+  function logout() { void api.logout(); sessionStorage.removeItem('stocksense-session'); sessionStorage.removeItem('stocksense-token'); sessionStorage.removeItem('stocksense-user'); setAuthenticated(false); setPage('dashboard'); }
   function navigate(next) { setPage(next); setMobileNav(false); setQuickSearch(''); setNotificationsOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   function notify(title, message, tone = 'success') { setToast({ title, message, tone }); }
   function applySnapshot(snapshot) {
@@ -287,6 +303,7 @@ export default function App() {
 
   const meta = PAGE_META[page];
   const unread = state.notifications.filter((item) => !item.read).length;
+  const pendingOperations = state.operations.filter((item) => !['Done', 'Cancelled'].includes(item.status)).length;
   const quickResults = quickSearch ? [
     ...state.products.filter((item) => `${item.name} ${item.sku}`.toLowerCase().includes(quickSearch.toLowerCase())).map((item) => ({ label: item.name, sub: item.sku, page: 'products' })),
     ...state.operations.filter((item) => `${item.id} ${item.partner || ''}`.toLowerCase().includes(quickSearch.toLowerCase())).map((item) => ({ label: item.id, sub: OPERATION_META[item.type].singular, page: 'operations' })),
@@ -295,7 +312,7 @@ export default function App() {
   const common = { state, setState, setModal, notify, submitOperation };
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to main content</a>
-    <Sidebar page={page} navigate={navigate} mobileNav={mobileNav} logout={logout} backendOnline={backendOnline} />
+    <Sidebar page={page} navigate={navigate} mobileNav={mobileNav} logout={logout} backendOnline={backendOnline} user={user} pendingOperations={pendingOperations} />
     {mobileNav && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
     <div className="app-main">
       <header className="topbar">
@@ -310,12 +327,12 @@ export default function App() {
         </div>
       </header>
       <main id="main-content" className="content">
-        {page === 'dashboard' && <Dashboard {...common} navigate={navigate} />}
+        {page === 'dashboard' && <Dashboard {...common} navigate={navigate} user={user} />}
         {page === 'products' && <Products {...common} />}
         {page === 'operations' && <Operations {...common} />}
         {page === 'history' && <MoveHistory {...common} />}
         {page === 'settings' && <SettingsPage {...common} theme={theme} toggleTheme={toggleTheme} resetWorkspace={resetWorkspace} />}
-        {page === 'profile' && <ProfilePage logout={logout} theme={theme} toggleTheme={toggleTheme} notify={notify} />}
+        {page === 'profile' && <ProfilePage logout={logout} theme={theme} toggleTheme={toggleTheme} notify={notify} user={user} setUser={setUser} />}
       </main>
       <footer className="app-footer"><span><i className={`status-dot ${backendOnline ? '' : 'offline'}`} />{backendOnline ? 'Cloud database connected · Synced just now' : 'Backend disconnected · Changes are not synced'}</span><span>INR · Asia/Kolkata · Production demo</span></footer>
     </div>
@@ -327,7 +344,7 @@ export default function App() {
   </div>;
 }
 
-function Sidebar({ page, navigate, mobileNav, logout, backendOnline }) {
+function Sidebar({ page, navigate, mobileNav, logout, backendOnline, user, pendingOperations }) {
   const nav = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'products', label: 'Products', icon: Package },
@@ -336,10 +353,10 @@ function Sidebar({ page, navigate, mobileNav, logout, backendOnline }) {
   ];
   return <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
     <div className="sidebar-head"><Logo /><button className="sidebar-close" onClick={() => navigate(page)} aria-label="Close navigation"><X size={19} /></button></div>
-    <button className="workspace-selector"><span>AC</span><div><small>Workspace</small><strong>Arbor & Co.</strong></div><ChevronDown size={16} /></button>
-    <nav aria-label="Main navigation"><span className="nav-label">Workspace</span>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{label}</span>{id === 'operations' && <Badge tone="sidebar">3</Badge>}</button>)}<span className="nav-label spaced">Manage</span><button className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings size={19} /><span>Settings</span></button></nav>
-    <div className="sidebar-status"><div><Database size={17} /><span><strong>{backendOnline ? 'Database live' : 'Offline mode'}</strong><small>{backendOnline ? 'SQLite · synced moments ago' : 'Local persistence active'}</small></span></div><span className={`pulse ${backendOnline ? '' : 'offline'}`} /></div>
-    <div className="sidebar-profile"><button onClick={() => navigate('profile')}><span className="avatar">MC</span><span><strong>Maya Chen</strong><small>Inventory Manager</small></span><MoreHorizontal size={18} /></button><button className="logout-btn" onClick={logout}><LogOut size={17} /><span>Sign out</span></button></div>
+    <button className="workspace-selector"><span>AC</span><div><small>Workspace</small><strong>{user.workspace || 'Arbor & Co.'}</strong></div><ChevronDown size={16} /></button>
+    <nav aria-label="Main navigation"><span className="nav-label">Workspace</span>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{label}</span>{id === 'operations' && pendingOperations > 0 && <Badge tone="sidebar">{pendingOperations}</Badge>}</button>)}<span className="nav-label spaced">Manage</span><button className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings size={19} /><span>Settings</span></button></nav>
+    <div className="sidebar-status"><div><Database size={17} /><span><strong>{backendOnline ? 'Database live' : 'Backend offline'}</strong><small>{backendOnline ? 'D1 · synced moments ago' : 'Reconnect to save changes'}</small></span></div><span className={`pulse ${backendOnline ? '' : 'offline'}`} /></div>
+    <div className="sidebar-profile"><button onClick={() => navigate('profile')}><span className="avatar">{(user.name || 'M C').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><span><strong>{user.name || 'Maya Chen'}</strong><small>{user.role || 'Inventory Manager'}</small></span><MoreHorizontal size={18} /></button><button className="logout-btn" onClick={logout}><LogOut size={17} /><span>Sign out</span></button></div>
   </aside>;
 }
 
@@ -361,7 +378,7 @@ function EmptyState({ icon: Icon = PackageOpen, title, body, action }) {
   return <div className="empty-state"><span><Icon size={26} /></span><h3>{title}</h3><p>{body}</p>{action}</div>;
 }
 
-function Dashboard({ state, setModal, navigate }) {
+function Dashboard({ state, setModal, navigate, user }) {
   const totalUnits = state.balances.reduce((sum, item) => sum + Number(item.quantity), 0);
   const stockedProducts = state.products.filter((product) => productTotal(state, product.id) > 0).length;
   const lowStock = state.products.filter((product) => productTotal(state, product.id) <= Number(product.reorderLevel));
@@ -371,8 +388,9 @@ function Dashboard({ state, setModal, navigate }) {
   const done = state.operations.filter((item) => item.status === 'Done').length;
   const completion = Math.round((done / Math.max(state.operations.length, 1)) * 100);
   const recent = [...state.operations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
   return <>
-    <EditorialHeader category="Saturday, 26 September" title="Good morning, Maya." description="Your inventory is stable. Two items need attention, and three operations are moving through the warehouse today.">
+    <EditorialHeader category={dateLabel} title={`Good morning, ${(user.name || 'Maya').split(' ')[0]}.`} description={lowStock.length ? `${lowStock.length} ${lowStock.length === 1 ? 'item needs' : 'items need'} attention. ${state.operations.length - done} ${state.operations.length - done === 1 ? 'operation is' : 'operations are'} still moving through the workspace.` : 'Your inventory is in good shape. Keep the flow moving with a quick action below.'}>
       <button className="btn secondary" onClick={() => navigate('history')}><History size={18} />View ledger</button><button className="btn primary" onClick={() => setModal({ type: 'operation', operationType: 'receipt' })}><Plus size={18} />New receipt</button>
     </EditorialHeader>
     <section className="metrics-grid" aria-label="Inventory metrics">
@@ -496,12 +514,19 @@ function SettingsPage({ state, setModal, notify, theme, toggleTheme, resetWorksp
   </>;
 }
 
-function ProfilePage({ logout, theme, toggleTheme, notify }) {
-  const [name, setName] = useState('Maya Chen');
-  const [email, setEmail] = useState('manager@stocksense.demo');
+function ProfilePage({ logout, theme, toggleTheme, notify, user, setUser }) {
+  const [name, setName] = useState(user.name || 'Maya Chen');
+  const [email, setEmail] = useState(user.email || 'manager@stocksense.demo');
+  function saveProfile(event) {
+    event.preventDefault();
+    const next = { ...user, name: name.trim() || user.name, email: email.trim() || user.email };
+    setUser(next);
+    sessionStorage.setItem('stocksense-user', JSON.stringify(next));
+    notify('Profile updated', 'Your name and work email are saved for this workspace.');
+  }
   return <>
     <EditorialHeader category="Account" title="My profile" description="Manage your identity, role, and local workspace preferences." />
-    <div className="profile-layout"><section className="panel profile-summary"><div className="profile-avatar">MC</div><h2>Maya Chen</h2><p>Inventory Manager</p><Badge tone="success" dot>Active session</Badge><div className="profile-facts"><div><Building2 size={18} /><span><small>Workspace</small><strong>Arbor & Co.</strong></span></div><div><ShieldCheck size={18} /><span><small>Access</small><strong>Full inventory control</strong></span></div><div><Clock3 size={18} /><span><small>Last sign-in</small><strong>Today, 09:18</strong></span></div></div><button className="btn secondary full" onClick={logout}><LogOut size={17} />Sign out securely</button></section><section className="panel profile-form"><div className="panel-heading"><div><span className="eyebrow">Personal details</span><h2>Profile information</h2></div></div><form onSubmit={(e) => { e.preventDefault(); notify('Profile updated', 'Your account details were saved on this device.'); }} className="form-stack"><div className="form-grid"><label>Full name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Role<input value="Inventory Manager" disabled /></label><label>Default warehouse<select defaultValue="w1"><option value="w1">Main Warehouse</option><option value="w2">Production Floor</option><option value="w3">Distribution Hub</option></select></label></div><div className="setting-row"><div><strong>Interface theme</strong><small>Currently using {theme} mode</small></div><button type="button" className="btn subtle" onClick={toggleTheme}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}Switch theme</button></div><div className="setting-row"><div><strong>Low-stock notifications</strong><small>Receive alerts when a product reaches its reorder level</small></div><label className="switch"><input type="checkbox" defaultChecked /><span /></label></div><div className="setting-row"><div><strong>Operation reminders</strong><small>Notify me about waiting receipts and deliveries</small></div><label className="switch"><input type="checkbox" defaultChecked /><span /></label></div><div className="modal-actions"><button className="btn primary">Save profile</button></div></form></section></div>
+    <div className="profile-layout"><section className="panel profile-summary"><div className="profile-avatar">{(user.name || 'M C').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div><h2>{user.name}</h2><p>{user.role || 'Inventory Manager'}</p><Badge tone="success" dot>Active session</Badge><div className="profile-facts"><div><Building2 size={18} /><span><small>Workspace</small><strong>{user.workspace || 'Arbor & Co.'}</strong></span></div><div><ShieldCheck size={18} /><span><small>Access</small><strong>Full inventory control</strong></span></div><div><Clock3 size={18} /><span><small>Session</small><strong>Signed in securely</strong></span></div></div><button className="btn secondary full" onClick={logout}><LogOut size={17} />Sign out securely</button></section><section className="panel profile-form"><div className="panel-heading"><div><span className="eyebrow">Personal details</span><h2>Profile information</h2></div></div><form onSubmit={saveProfile} className="form-stack"><div className="form-grid"><label>Full name<input value={name} onChange={(e) => setName(e.target.value)} /></label><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Role<input value={user.role || 'Inventory Manager'} disabled /></label><label>Default warehouse<select defaultValue="w1"><option value="w1">Main Warehouse</option><option value="w2">Production Floor</option><option value="w3">Distribution Hub</option></select></label></div><div className="setting-row"><div><strong>Interface theme</strong><small>Currently using {theme} mode</small></div><button type="button" className="btn subtle" onClick={toggleTheme}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}Switch theme</button></div><div className="setting-row"><div><strong>Low-stock notifications</strong><small>Receive alerts when a product reaches its reorder level</small></div><label className="switch"><input type="checkbox" defaultChecked /><span /></label></div><div className="setting-row"><div><strong>Operation reminders</strong><small>Notify me about waiting receipts and deliveries</small></div><label className="switch"><input type="checkbox" defaultChecked /><span /></label></div><div className="modal-actions"><button className="btn primary">Save profile</button></div></form></section></div>
   </>;
 }
 

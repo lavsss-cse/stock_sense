@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LoginSchema, OperationWriteSchema, StateWriteSchema, zodMessage } from './src/domain.js';
+import { LoginSchema, OperationWriteSchema, OtpRequestSchema, StateWriteSchema, zodMessage } from './src/domain.js';
 import { InventoryError, saveOperation } from './src/inventory.js';
 import { seedState } from './src/store.js';
 
@@ -60,9 +60,14 @@ app.post('/api/auth/login', (request, response) => {
   db.prepare('INSERT INTO sessions (token, user_id, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(token, `local:${parsed.data.email}`, parsed.data.email.toLowerCase(), createdAt.toISOString(), expiresAt.toISOString());
   response.json({ token, expiresAt: expiresAt.toISOString(), user: { name: 'Maya Chen', email: parsed.data.email, role: 'Inventory Manager', workspace: 'Arbor & Co.' } });
 });
+app.post('/api/auth/request-otp', (request, response) => {
+  const parsed = OtpRequestSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ message: zodMessage(parsed.error), details: parsed.error.flatten() });
+  response.json({ sent: true, prototypeOtp: '482913', expiresInSeconds: 600 });
+});
 
 app.use('/api', (request, _response, next) => {
-  if (request.path === '/health' || request.path === '/auth/login') return next();
+  if (request.path === '/health' || request.path === '/auth/login' || request.path === '/auth/request-otp') return next();
   const auth = request.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   const session = token ? db.prepare('SELECT user_id, email, expires_at FROM sessions WHERE token = ?').get(token) : null;
