@@ -3,5 +3,6 @@ node_modules_incomplete/
 dist/
 data/*.db-shm
 data/*.db-wal
+data/*.db
 .sites-runtime/
 .env

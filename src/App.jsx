@@ -8,8 +8,10 @@ import {
   SlidersHorizontal, Sparkles, Sun, Truck, Warehouse, X, XCircle,
 } from 'lucide-react';
 import {
-  balanceAt, formatDate, loadState, locationLabel, productTotal, saveState, seedState, uid,
+  balanceAt, formatDate, loadState, locationLabel, productTotal, saveState, uid,
 } from './store.js';
+import { api, ApiError } from './api.js';
+import { AppStateSchema } from './domain.js';
 
 const PAGE_META = {
   dashboard: ['Overview', 'Dashboard', 'A clear view of your inventory, movements, and the work that needs attention.'],
@@ -137,7 +139,7 @@ function AuthMiniModal({ type, onClose }) {
 
 export default function App() {
   const [booting, setBooting] = useState(true);
-  const [authenticated, setAuthenticated] = useState(() => sessionStorage.getItem('stocksense-session') === 'active');
+  const [authenticated, setAuthenticated] = useState(() => sessionStorage.getItem('stocksense-session') === 'active' && Boolean(sessionStorage.getItem('stocksense-token')));
   const [state, setState] = useState(loadState);
   const [page, setPage] = useState('dashboard');
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'light');
@@ -148,30 +150,68 @@ export default function App() {
   const [quickSearch, setQuickSearch] = useState('');
   const [backendOnline, setBackendOnline] = useState(false);
   const hydrated = useRef(false);
+  const revision = useRef(1);
+  const suppressSave = useRef(false);
+  const saveTimer = useRef(null);
+  const pendingSave = useRef(Promise.resolve());
 
   useEffect(() => {
+    if (!authenticated) {
+      hydrated.current = false;
+      setBackendOnline(false);
+      setBooting(false);
+      return undefined;
+    }
     let active = true;
-    fetch('/api/state').then((response) => {
-      if (!response.ok) throw new Error('Backend unavailable');
-      return response.json();
-    }).then((data) => {
-      if (active) { setState(data); setBackendOnline(true); }
-    }).catch(() => setBackendOnline(false)).finally(() => {
+    setBooting(true);
+    api.getState().then((snapshot) => {
+      if (active) {
+        revision.current = snapshot.revision;
+        suppressSave.current = true;
+        setState(snapshot.state);
+        setBackendOnline(true);
+      }
+    }).catch((error) => {
+      setBackendOnline(false);
+      if (error instanceof ApiError && error.status === 401) {
+        sessionStorage.removeItem('stocksense-session');
+        sessionStorage.removeItem('stocksense-token');
+        setAuthenticated(false);
+      } else if (active) setToast({ title: 'Backend unavailable', message: error.message, tone: 'danger' });
+    }).finally(() => {
       hydrated.current = true;
-      setTimeout(() => active && setBooting(false), 500);
+      setTimeout(() => active && setBooting(false), 350);
     });
     return () => { active = false; };
-  }, []);
+  }, [authenticated]);
   useEffect(() => {
     saveState(state);
-    if (!hydrated.current) return;
-    const timer = setTimeout(() => {
-      fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) })
-        .then((response) => { if (!response.ok) throw new Error(); setBackendOnline(true); })
-        .catch(() => setBackendOnline(false));
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [state]);
+    if (!hydrated.current || !authenticated) return undefined;
+    if (suppressSave.current) { suppressSave.current = false; return undefined; }
+    const parsed = AppStateSchema.safeParse(state);
+    if (!parsed.success) {
+      setBackendOnline(false);
+      setToast({ title: 'Validation stopped an unsafe change', message: parsed.error.issues[0]?.message || 'Inventory data is invalid.', tone: 'danger' });
+      return undefined;
+    }
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      pendingSave.current = pendingSave.current.then(() => api.saveState(parsed.data, revision.current)).then((snapshot) => {
+        revision.current = snapshot.revision;
+        setBackendOnline(true);
+      }).catch(async (error) => {
+        setBackendOnline(false);
+        if (error instanceof ApiError && error.status === 409) {
+          const latest = await api.getState();
+          revision.current = latest.revision;
+          suppressSave.current = true;
+          setState(latest.state);
+          setToast({ title: 'Inventory refreshed', message: 'Another session saved first, so the latest server copy was loaded.', tone: 'danger' });
+        } else setToast({ title: 'Save failed', message: error.message, tone: 'danger' });
+      });
+    }, 300);
+    return () => clearTimeout(saveTimer.current);
+  }, [state, authenticated]);
   useEffect(() => {
     const context = document.modelContext;
     if (!context?.registerTool || !authenticated) return;
@@ -215,20 +255,32 @@ export default function App() {
     setTheme(next); document.documentElement.dataset.theme = next; localStorage.setItem('stocksense-theme', next);
   }
   async function login(email, password) {
-    try {
-      const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Authentication failed.');
-      sessionStorage.setItem('stocksense-token', data.token); setBackendOnline(true);
-    } catch (error) {
-      if (!(error instanceof TypeError)) throw error;
-      sessionStorage.setItem('stocksense-token', 'offline-prototype'); setBackendOnline(false);
-    }
+    const data = await api.login(email, password);
+    sessionStorage.setItem('stocksense-token', data.token);
+    setBackendOnline(true);
     sessionStorage.setItem('stocksense-session', 'active'); setAuthenticated(true); setBooting(true); setTimeout(() => setBooting(false), 700);
   }
-  function logout() { sessionStorage.removeItem('stocksense-session'); sessionStorage.removeItem('stocksense-token'); setAuthenticated(false); setPage('dashboard'); }
+  function logout() { void api.logout(); sessionStorage.removeItem('stocksense-session'); sessionStorage.removeItem('stocksense-token'); setAuthenticated(false); setPage('dashboard'); }
   function navigate(next) { setPage(next); setMobileNav(false); setQuickSearch(''); setNotificationsOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   function notify(title, message, tone = 'success') { setToast({ title, message, tone }); }
+  function applySnapshot(snapshot) {
+    revision.current = snapshot.revision;
+    suppressSave.current = true;
+    setState(snapshot.state);
+    setBackendOnline(true);
+  }
+  async function submitOperation(operation, validate) {
+    clearTimeout(saveTimer.current);
+    await pendingSave.current;
+    const snapshot = await api.saveOperation(state, operation, validate, revision.current);
+    applySnapshot(snapshot);
+    return snapshot.state;
+  }
+  async function resetWorkspace() {
+    clearTimeout(saveTimer.current);
+    await pendingSave.current;
+    applySnapshot(await api.reset(revision.current));
+  }
 
   if (booting) return <BrandedLoader />;
   if (!authenticated) return <Login onLogin={login} theme={theme} toggleTheme={toggleTheme} />;
@@ -240,7 +292,7 @@ export default function App() {
     ...state.operations.filter((item) => `${item.id} ${item.partner || ''}`.toLowerCase().includes(quickSearch.toLowerCase())).map((item) => ({ label: item.id, sub: OPERATION_META[item.type].singular, page: 'operations' })),
   ].slice(0, 6) : [];
 
-  const common = { state, setState, setModal, notify };
+  const common = { state, setState, setModal, notify, submitOperation };
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to main content</a>
     <Sidebar page={page} navigate={navigate} mobileNav={mobileNav} logout={logout} backendOnline={backendOnline} />
@@ -262,14 +314,14 @@ export default function App() {
         {page === 'products' && <Products {...common} />}
         {page === 'operations' && <Operations {...common} />}
         {page === 'history' && <MoveHistory {...common} />}
-        {page === 'settings' && <SettingsPage {...common} theme={theme} toggleTheme={toggleTheme} />}
+        {page === 'settings' && <SettingsPage {...common} theme={theme} toggleTheme={toggleTheme} resetWorkspace={resetWorkspace} />}
         {page === 'profile' && <ProfilePage logout={logout} theme={theme} toggleTheme={toggleTheme} notify={notify} />}
       </main>
-      <footer className="app-footer"><span><i className={`status-dot ${backendOnline ? '' : 'offline'}`} />{backendOnline ? 'SQLite database connected · Synced just now' : 'Offline fallback active · Changes saved locally'}</span><span>INR · Asia/Kolkata · Production demo</span></footer>
+      <footer className="app-footer"><span><i className={`status-dot ${backendOnline ? '' : 'offline'}`} />{backendOnline ? 'Cloud database connected · Synced just now' : 'Backend disconnected · Changes are not synced'}</span><span>INR · Asia/Kolkata · Production demo</span></footer>
     </div>
     {modal?.type === 'product' && <ProductModal state={state} setState={setState} product={modal.product} onClose={() => setModal(null)} notify={notify} />}
-    {modal?.type === 'operation' && <OperationModal state={state} setState={setState} operationType={modal.operationType} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
-    {modal?.type === 'operationDetail' && <OperationDetail state={state} setState={setState} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
+    {modal?.type === 'operation' && <OperationModal state={state} submitOperation={submitOperation} operationType={modal.operationType} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
+    {modal?.type === 'operationDetail' && <OperationDetail state={state} submitOperation={submitOperation} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
     {modal?.type === 'warehouse' && <WarehouseModal state={state} setState={setState} warehouse={modal.warehouse} onClose={() => setModal(null)} notify={notify} />}
     {toast && <Toast toast={toast} clear={() => setToast(null)} />}
   </div>;
@@ -359,6 +411,7 @@ function Products({ state, setState, setModal, notify }) {
 
   function removeProduct(product) {
     if (productTotal(state, product.id) !== 0) { notify('Product cannot be archived', 'Move or adjust its remaining stock to zero first.', 'danger'); return; }
+    if (state.operations.some((item) => item.productId === product.id) || state.movements.some((item) => item.productId === product.id)) { notify('Product cannot be archived', 'Its operation and movement history must remain linked for audit integrity.', 'danger'); return; }
     if (!window.confirm(`Archive ${product.name}? This removes it from the active catalogue.`)) return;
     setState((prev) => ({ ...prev, products: prev.products.filter((item) => item.id !== product.id), balances: prev.balances.filter((item) => item.productId !== product.id) }));
     notify('Product archived', `${product.name} was removed from the active catalogue.`);
@@ -424,10 +477,13 @@ function MoveHistory({ state }) {
   </>;
 }
 
-function SettingsPage({ state, setState, setModal, notify, theme, toggleTheme }) {
-  function resetDemo() {
+function SettingsPage({ state, setModal, notify, theme, toggleTheme, resetWorkspace }) {
+  async function resetDemo() {
     if (!window.confirm('Reset all prototype data to the original demo records? Your changes will be replaced.')) return;
-    setState(structuredClone(seedState)); notify('Demo data restored', 'The workspace has been reset to its original sample records.');
+    try {
+      await resetWorkspace();
+      notify('Demo data restored', 'The workspace has been reset to its original sample records.');
+    } catch (error) { notify('Reset failed', error.message, 'danger'); }
   }
   return <>
     <EditorialHeader category="Workspace controls" title="Warehouses & settings" description="Manage stock locations, workspace preferences, and the foundations of your inventory environment.">
@@ -484,48 +540,17 @@ function WarehouseModal({ state, setState, warehouse, onClose, notify }) {
     event.preventDefault(); const id = warehouse?.id || uid('w');
     const record = { id, name: form.name.trim(), code: form.code.trim().toUpperCase(), address: form.address.trim(), active: true };
     const names = form.locations.split(',').map((name) => name.trim()).filter(Boolean);
+    if (state.warehouses.some((item) => item.code.toLowerCase() === record.code.toLowerCase() && item.id !== id)) { notify('Warehouse not saved', 'This warehouse code is already in use.', 'danger'); return; }
+    const oldLocations = state.locations.filter((item) => item.warehouseId === id);
+    const removedLocations = oldLocations.slice(names.length);
+    if (removedLocations.some((location) => state.balances.some((balance) => balance.locationId === location.id) || state.operations.some((operationItem) => operationItem.sourceId === location.id || operationItem.destinationId === location.id))) { notify('Warehouse not saved', 'A location with stock or operation history cannot be removed. Rename it instead.', 'danger'); return; }
     setState((prev) => ({ ...prev, warehouses: warehouse ? prev.warehouses.map((item) => item.id === id ? record : item) : [...prev.warehouses, record], locations: [...prev.locations.filter((item) => item.warehouseId !== id), ...names.map((name, index) => ({ id: warehouse && state.locations.filter((l) => l.warehouseId === id)[index]?.id || uid('l'), warehouseId: id, name }))] }));
     notify(warehouse ? 'Warehouse updated' : 'Warehouse added', `${record.name} and its locations are ready.`); onClose();
   }
   return <Modal title={warehouse ? 'Edit warehouse' : 'Add a warehouse'} subtitle="Warehouses contain the locations where product stock is stored." onClose={onClose}><form className="form-stack" onSubmit={submit}><label>Warehouse name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. South Distribution Hub" autoFocus /></label><label>Short code<input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. SOUTH" /></label><label>Address or description<input required value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street, building, or area" /></label><label>Locations <small>(comma-separated)</small><textarea required rows="3" value={form.locations} onChange={(e) => setForm({ ...form, locations: e.target.value })} placeholder="Rack A, Rack B, Dispatch Zone" /></label><div className="modal-actions"><button type="button" className="btn secondary" onClick={onClose}>Cancel</button><button className="btn primary">Save warehouse</button></div></form></Modal>;
 }
 
-function applyBalance(balances, productId, locationId, delta, setAbsolute = false) {
-  const index = balances.findIndex((item) => item.productId === productId && item.locationId === locationId);
-  if (index >= 0) balances[index] = { ...balances[index], quantity: setAbsolute ? delta : Number(balances[index].quantity) + delta };
-  else balances.push({ productId, locationId, quantity: setAbsolute ? delta : delta });
-}
-
-function validateOperationState(current, operation) {
-  const next = structuredClone(current);
-  const quantity = Number(operation.quantity);
-  if (!quantity || quantity <= 0) return { error: 'Enter a quantity greater than zero.' };
-  if (operation.type === 'delivery') {
-    const available = balanceAt(next, operation.productId, operation.sourceId);
-    if (available < quantity) return { error: `Only ${available} units are available at the selected source location.` };
-    applyBalance(next.balances, operation.productId, operation.sourceId, -quantity);
-  } else if (operation.type === 'receipt') {
-    applyBalance(next.balances, operation.productId, operation.destinationId, quantity);
-  } else if (operation.type === 'transfer') {
-    if (operation.sourceId === operation.destinationId) return { error: 'Source and destination must be different.' };
-    const available = balanceAt(next, operation.productId, operation.sourceId);
-    if (available < quantity) return { error: `Only ${available} units are available at the selected source location.` };
-    applyBalance(next.balances, operation.productId, operation.sourceId, -quantity);
-    applyBalance(next.balances, operation.productId, operation.destinationId, quantity);
-  } else {
-    const recorded = balanceAt(next, operation.productId, operation.sourceId);
-    operation.adjustmentDelta = quantity - recorded;
-    applyBalance(next.balances, operation.productId, operation.sourceId, quantity, true);
-  }
-  operation.status = 'Done';
-  const exists = next.operations.some((item) => item.id === operation.id);
-  next.operations = exists ? next.operations.map((item) => item.id === operation.id ? operation : item) : [operation, ...next.operations];
-  const movementQuantity = operation.type === 'adjustment' ? operation.adjustmentDelta : quantity;
-  next.movements = [{ id: uid('m'), operationId: operation.id, type: operation.type, productId: operation.productId, quantity: movementQuantity, fromId: operation.sourceId, toId: operation.destinationId, date: new Date().toISOString(), user: 'Maya Chen' }, ...next.movements];
-  return { next };
-}
-
-function OperationModal({ state, setState, operationType, operation, onClose, notify }) {
+function OperationModal({ state, submitOperation, operationType, operation, onClose, notify }) {
   const meta = OPERATION_META[operationType];
   const defaultLocation = state.locations[0]?.id || '';
   const [form, setForm] = useState(operation || { productId: state.products[0]?.id || '', quantity: '', partner: '', sourceId: defaultLocation, destinationId: state.locations[1]?.id || defaultLocation, date: new Date().toISOString().slice(0, 10), note: '', picked: false, packed: false });
@@ -535,22 +560,18 @@ function OperationModal({ state, setState, operationType, operation, onClose, no
   const currentAtSource = balanceAt(state, form.productId, form.sourceId);
   const currentAtDestination = balanceAt(state, form.productId, form.destinationId);
   const adjustmentDelta = operationType === 'adjustment' && form.quantity !== '' ? Number(form.quantity) - currentAtSource : 0;
-  function record(status) {
+  async function record(status) {
     setError('');
-    if (!form.productId || !form.quantity || Number(form.quantity) <= 0) { setError('Choose a product and enter a valid quantity.'); return; }
+    if (!form.productId || form.quantity === '' || Number(form.quantity) < 0 || (operationType !== 'adjustment' && Number(form.quantity) === 0)) { setError(operationType === 'adjustment' ? 'Choose a product and enter a physical count of zero or more.' : 'Choose a product and enter a quantity greater than zero.'); return; }
     if (operationType === 'receipt' && !form.partner.trim()) { setError('Supplier is required for a receipt.'); return; }
     if (operationType === 'delivery' && !form.partner.trim()) { setError('Customer is required for a delivery.'); return; }
     if (operationType === 'delivery' && status === 'Done' && (!form.picked || !form.packed)) { setError('Confirm that the items are both picked and packed before validation.'); return; }
     const recordData = { ...form, id: operation?.id || uid(meta.prefix), type: operationType, quantity: Number(form.quantity), status, partner: form.partner?.trim(), note: form.note?.trim() };
-    if (status === 'Done') {
-      const result = validateOperationState(state, recordData);
-      if (result.error) { setError(result.error); return; }
-      setState(result.next); notify(`${meta.singular} validated`, `${recordData.id} updated stock and was added to the ledger.`);
-    } else {
-      setState((prev) => ({ ...prev, operations: operation ? prev.operations.map((item) => item.id === operation.id ? recordData : item) : [recordData, ...prev.operations] }));
-      notify(`${meta.singular} saved`, `${recordData.id} is ${status.toLowerCase()} and has not changed stock.`);
-    }
-    onClose();
+    try {
+      await submitOperation(recordData, status === 'Done');
+      notify(status === 'Done' ? `${meta.singular} validated` : `${meta.singular} saved`, status === 'Done' ? `${recordData.id} updated stock and was added to the ledger.` : `${recordData.id} is ${status.toLowerCase()} and has not changed stock.`);
+      onClose();
+    } catch (requestError) { setError(requestError.message || 'The operation could not be saved.'); }
   }
   return <Modal title={operation ? `Edit ${operation.id}` : `New ${meta.singular.toLowerCase()}`} subtitle={operationType === 'receipt' ? 'Record goods arriving from a supplier.' : operationType === 'delivery' ? 'Prepare stock leaving for a customer.' : operationType === 'transfer' ? 'Move stock between internal locations.' : 'Reconcile recorded stock with a physical count.'} onClose={onClose} wide>
     <div className="operation-form">{error && <div className="form-alert danger"><AlertTriangle size={17} />{error}</div>}<div className="workflow-steps"><div className="active"><span>1</span><strong>Document details</strong></div><i /><div><span>2</span><strong>Review stock</strong></div><i /><div><span>3</span><strong>Validate</strong></div></div><div className="form-section"><div><span>01</span><h3>Document details</h3></div><div className="form-grid"><label>Product<select value={form.productId} onChange={(e) => set('productId', e.target.value)}>{state.products.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.sku}</option>)}</select></label><label>{operationType === 'adjustment' ? 'Physical counted quantity' : 'Quantity'}<div className="quantity-input"><input type="number" min="0.01" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} placeholder="0" /><span>{product?.unit}</span></div></label>{operationType === 'receipt' && <label>Supplier<input value={form.partner} onChange={(e) => set('partner', e.target.value)} placeholder="Supplier name" /></label>}{operationType === 'delivery' && <label>Customer<input value={form.partner} onChange={(e) => set('partner', e.target.value)} placeholder="Customer name" /></label>}<label>Scheduled date<input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} /></label></div></div>
@@ -562,18 +583,21 @@ function OperationModal({ state, setState, operationType, operation, onClose, no
   </Modal>;
 }
 
-function OperationDetail({ state, setState, operation, onClose, notify }) {
+function OperationDetail({ state, submitOperation, operation, onClose, notify }) {
   const [error, setError] = useState('');
   const current = state.operations.find((item) => item.id === operation.id) || operation;
   const product = state.products.find((item) => item.id === current.productId);
-  function setStatus(status) {
-    setState((prev) => ({ ...prev, operations: prev.operations.map((item) => item.id === current.id ? { ...item, status } : item) }));
-    notify('Status updated', `${current.id} is now ${status.toLowerCase()}.`); onClose();
+  async function setStatus(status) {
+    try {
+      await submitOperation({ ...current, status }, false);
+      notify('Status updated', `${current.id} is now ${status.toLowerCase()}.`); onClose();
+    } catch (requestError) { setError(requestError.message || 'The status could not be changed.'); }
   }
-  function validate() {
-    const result = validateOperationState(state, { ...current });
-    if (result.error) { setError(result.error); return; }
-    setState(result.next); notify('Operation validated', `${current.id} changed stock and was added to Move History.`); onClose();
+  async function validate() {
+    try {
+      await submitOperation({ ...current }, true);
+      notify('Operation validated', `${current.id} changed stock and was added to Move History.`); onClose();
+    } catch (requestError) { setError(requestError.message || 'The operation could not be validated.'); }
   }
   return <Modal title={current.id} subtitle={`${OPERATION_META[current.type].singular} · created for ${formatDate(current.date)}`} onClose={onClose} wide><div className="detail-header"><div className={`detail-symbol ${OPERATION_META[current.type].tone}`}>{(() => { const Icon = OPERATION_META[current.type].icon; return <Icon size={25} />; })()}</div><div><span>{OPERATION_META[current.type].singular}</span><h3>{product?.name}</h3><code>{product?.sku}</code></div><Badge tone={STATUS_TONE[current.status]} dot>{current.status}</Badge></div>{error && <div className="form-alert danger"><AlertTriangle size={17} />{error}</div>}<div className="detail-grid"><div><span>Quantity</span><strong>{current.quantity} {product?.unit}</strong></div><div><span>{current.type === 'receipt' ? 'Supplier' : current.type === 'delivery' ? 'Customer' : 'Scheduled date'}</span><strong>{current.partner || formatDate(current.date)}</strong></div><div><span>Source</span><strong>{current.sourceId ? locationLabel(state, current.sourceId) : 'External supplier'}</strong></div><div><span>Destination</span><strong>{current.destinationId ? locationLabel(state, current.destinationId) : 'Customer shipment'}</strong></div></div>{current.note && <div className="detail-note"><FileText size={17} /><div><span>Internal note</span><p>{current.note}</p></div></div>}<div className="activity-mini"><span className="eyebrow">Document timeline</span><div><i className="done"><Check size={13} /></i><span><strong>Document created</strong><small>{formatDate(current.date)} · Maya Chen</small></span></div><div><i className={current.status !== 'Draft' ? 'done' : ''}>{current.status !== 'Draft' ? <Check size={13} /> : <Clock3 size={13} />}</i><span><strong>Prepared for validation</strong><small>{current.status === 'Draft' ? 'Awaiting team action' : 'Stock checks completed'}</small></span></div><div><i className={current.status === 'Done' ? 'done' : ''}>{current.status === 'Done' ? <Check size={13} /> : <Clock3 size={13} />}</i><span><strong>Stock movement posted</strong><small>{current.status === 'Done' ? 'Recorded in Move History' : 'No stock change yet'}</small></span></div></div><div className="modal-actions split"><button className="btn secondary" onClick={onClose}>Close</button>{!['Done', 'Cancelled'].includes(current.status) && <div><button className="btn danger subtle-danger" onClick={() => { if (window.confirm(`Cancel ${current.id}? No stock will be changed.`)) setStatus('Cancelled'); }}>Cancel document</button>{current.status === 'Draft' && <button className="btn subtle" onClick={() => setStatus(current.type === 'receipt' ? 'Waiting' : 'Ready')}>Mark {current.type === 'receipt' ? 'waiting' : 'ready'}</button>}<button className="btn primary" onClick={validate}><CheckCircle2 size={17} />Validate operation</button></div>}</div></Modal>;
 }

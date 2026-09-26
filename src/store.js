@@ -30,7 +30,7 @@ export const seedState = {
   operations: [
     { id: 'REC-2401', type: 'receipt', status: 'Done', partner: 'Metro Steel Co.', productId: 'p1', quantity: 100, destinationId: 'l1', date: '2026-09-24', note: 'Monthly raw material delivery' },
     { id: 'TRF-1831', type: 'transfer', status: 'Done', productId: 'p1', quantity: 30, sourceId: 'l1', destinationId: 'l3', date: '2026-09-25', note: 'Production allocation' },
-    { id: 'DEL-0934', type: 'delivery', status: 'Ready', partner: 'Northstar Interiors', productId: 'p2', quantity: 8, sourceId: 'l2', date: '2026-09-27', note: 'SO-4392' },
+    { id: 'DEL-0934', type: 'delivery', status: 'Ready', partner: 'Northstar Interiors', productId: 'p2', quantity: 8, sourceId: 'l2', date: '2026-09-27', note: 'SO-4392', picked: true, packed: true },
     { id: 'REC-2408', type: 'receipt', status: 'Waiting', partner: 'PackRight Ltd.', productId: 'p4', quantity: 250, destinationId: 'l4', date: '2026-09-28', note: 'PO-8821' },
     { id: 'ADJ-0517', type: 'adjustment', status: 'Draft', productId: 'p5', quantity: 18, sourceId: 'l1', date: '2026-09-26', note: 'Cycle count' },
   ],
