@@ -1,85 +1,232 @@
-# StockSense — Intelligent Multi-Location Inventory Workspace
+# StockSense
 
-**StockSense** is an enterprise-grade multi-location inventory management workspace for tracking products, SKUs, warehouse storage locations, stock balances, movements ledger, and transactional operations (Receipts, Deliveries, Internal Transfers, and Physical Count Audits).
+### A modern workspace for confident, multi-location inventory operations
 
----
-
-## 🚀 Key Features & Capabilities
-
-- **Pure Inventory Domain Engine** ([`src/inventory.js`](file:///e:/Stock-Sense/src/inventory.js)):
-  - **Inbound Receipts**: Inflow from suppliers with automatic location racking and ledger movement creation.
-  - **Outbound Deliveries**: Order fulfillment with picked & packed quality verification, stock coverage checks, and negative-stock prevention.
-  - **Internal Transfers**: Relocation between warehouse locations with real-time balance checks and immutable movement logs.
-  - **Physical Count Audits**: Cyclic inventory reconciliation with signed delta tracking (`+` / `-`).
-  - **Conflict & Re-post Protection**: Monotonic revision check and protection against duplicate operation completion (HTTP 409).
-- **Zod Schema Invariants** ([`src/domain.js`](file:///e:/Stock-Sense/src/domain.js)): Strict entity validation, unique SKUs, valid location hierarchy, and orphaned balance prevention.
-- **Dual Runtime Architecture**:
-  - **Local Node.js**: Express server with SQLite native persistence ([`server.mjs`](file:///e:/Stock-Sense/server.mjs)).
-  - **Edge Worker**: Cloudflare / D1 SQLite compatible edge runtime ([`worker/index.js`](file:///e:/Stock-Sense/worker/index.js)).
-- **Modern UI & UX System** ([`src/App.jsx`](file:///e:/Stock-Sense/src/App.jsx), [`src/styles.css`](file:///e:/Stock-Sense/src/styles.css)):
-  - Curated Dark & Light mode themes with obsidian surfaces, ambient glow, and micro-animations.
-  - Real-time KPI stats: Total stock units, valuation $, low-stock alerts, and pending work orders.
-  - Searchable product catalogue with category & stock level filters, location breakdown modals, and CSV export.
-  - Interactive Command Palette (`Ctrl + K`).
-  - Live sync indicator showing connection state and revision number.
-  - Activity alerts notification drawer.
+StockSense brings products, warehouse locations, stock movements, and daily inventory work into one focused application. It is built for teams that need to receive stock, fulfil orders, transfer items between locations, and reconcile physical counts without losing sight of what changed and why.
 
 ---
 
-## 🛠️ Quick Start & Local Development
+## ✨ What you can do
 
-### 1. Start Development Environment
-Starts both the backend Express API (Port `8787`) and Vite frontend dev server (Port `5173`) with live reload and proxy:
+| Area | Highlights |
+| --- | --- |
+| **Inventory visibility** | Browse products, SKUs, categories, locations, stock levels, valuation, and low-stock alerts. |
+| **Daily operations** | Create and post receipts, deliveries, internal transfers, and physical count adjustments. |
+| **Movement history** | Keep a traceable ledger of every completed stock movement. |
+| **Safety rules** | Prevent duplicate operation posting, invalid locations, orphaned balances, and negative stock. |
+| **Productive interface** | Use search, filters, CSV export, notifications, light/dark themes, and the `Ctrl + K` command palette. |
+| **Two deployment paths** | Run locally with Express + SQLite or bundle the edge worker for Cloudflare/D1-compatible environments. |
+
+---
+
+## 🧰 Built with
+
+- **React 18** and **Vite** for the interface
+- **Express** for the local API
+- **SQLite** for local persistence
+- **Zod** for validation and domain invariants
+- **Cloudflare Worker / D1-compatible** edge runtime
+
+---
+
+## ✅ Before you begin
+
+Install the following on your computer:
+
+- [Node.js 24 or later](https://nodejs.org/) — the local server uses Node's built-in SQLite module
+- Git
+
+Check your Node.js version:
+
+```bash
+node --version
+```
+
+> **Tip:** If the version is lower than 24, upgrade Node.js before starting the local server.
+
+---
+
+## 🚀 Get the project and run it
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/lavsss-cse/stock_sense.git
+cd stock_sense
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Start StockSense
+
 ```bash
 npm run dev
 ```
 
-### 2. Demo Credentials
-- **Inventory persona** — product catalogue, stock balances, audits, and reporting:
-  - Email: `inventory@stocksense.demo`
-  - Password: `demo1234`
-- **Warehouse persona** — opens directly into the inventory workspace for receiving, transfers, fulfilment, and location work:
-  - Email: `warehouse@stocksense.demo`
-  - Password: `demo1234`
-- **Prototype OTP**: `482913`
+This starts both services:
 
-### 3. Run Automated Domain Tests
+- Web application: **http://localhost:5173**
+- Local API: **http://localhost:8787**
+
+Open **http://localhost:5173** in your browser. Stop the development servers at any time with `Ctrl + C` in the terminal.
+
+---
+
+## 🔐 Demo access
+
+Use either of the included demo accounts on the sign-in screen.
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Inventory Manager | `inventory@stocksense.demo` | `demo1234` |
+| Warehouse Operator | `warehouse@stocksense.demo` | `demo1234` |
+
+**Prototype OTP:** `482913`
+
+The Inventory Manager can work across the catalogue, reports, audits, and operations. The Warehouse Operator is intended for warehouse-focused tasks and has more limited permissions.
+
+---
+
+## 🔄 Pull the latest changes
+
+When you already have a copy of the project, use these commands before you start working:
+
+```bash
+git checkout main
+git pull origin main
+npm install
+```
+
+Then run the application normally:
+
+```bash
+npm run dev
+```
+
+### Helpful update tips
+
+- Run `git status` before pulling. Commit or temporarily save your own work first if Git reports local changes.
+- Run `npm install` after pulling whenever `package.json` or `package-lock.json` has changed.
+- If the browser appears to show an older interface, stop the dev server, start it again, and refresh the page with `Ctrl + Shift + R`.
+- Local demo data is saved in `data/stocksense.db`. It is not committed to Git, so each developer keeps their own local data.
+
+---
+
+## 🧪 Quality checks
+
+Run the domain tests with:
+
 ```bash
 npm test
 ```
 
-### 4. Build Production Bundle
-Builds the optimized React client to `dist/client` and bundles the edge worker to `dist/server/index.js`:
+Create a production build with:
+
 ```bash
 npm run build
 ```
 
-### 5. Start Production Server
+After building, start the production server:
+
 ```bash
 npm start
 ```
 
+The production server serves the built web app from **http://localhost:8787**.
+
 ---
 
-## 📂 Project Structure
+## 📁 Project map
 
 ```text
-STOCK-SENSE/
+stock_sense/
 ├── src/
-│   ├── App.jsx              # React UI shell, views, modals, and client orchestration
+│   ├── App.jsx              # Application screens, modals, and UI behaviour
+│   ├── api.js               # Browser API client
+│   ├── domain.js            # Zod schemas and validation rules
+│   ├── inventory.js         # Inventory operations and movement-ledger logic
 │   ├── main.jsx             # React entry point
-│   ├── api.js               # Browser API client with token injection & response parsing
-│   ├── domain.js            # Shared Zod schemas and cross-record invariant validation
-│   ├── inventory.js         # Central inventory domain engine & movement ledger logic
-│   ├── store.js             # Realistic seed state, localStorage fallback, and selectors
-│   └── styles.css           # Design tokens, themes (dark/light), modals, cards, & tables
-├── server.mjs               # Local Express server with Node 24 native SQLite persistence
-├── worker/index.js          # Cloudflare Edge Worker API with D1 database binding
-├── db/schema.ts             # Database schema interfaces for workspace_state and sessions
-├── scripts/build-worker.mjs # Build pipeline for Vite client and esbuild edge worker
-├── dev.mjs                  # Concurrent launcher for API server and Vite client
-├── tests/inventory.test.js  # Test suite verifying all domain invariants and rules
-├── index.html               # Vite HTML entry with modern typography and metadata
-├── vite.config.js           # Vite dev and build configuration
-└── package.json             # Scripts and dependencies
+│   ├── store.js             # Seed data, state helpers, and selectors
+│   └── styles.css           # Themes and visual design system
+├── worker/
+│   └── index.js             # Edge-worker API implementation
+├── db/schema.ts             # Database schema interfaces
+├── scripts/build-worker.mjs # Production build pipeline
+├── tests/inventory.test.js  # Domain test suite
+├── dev.mjs                  # Starts the local API and Vite together
+├── server.mjs               # Express + SQLite local server
+├── package.json             # Commands and dependencies
+└── vite.config.js           # Vite configuration
 ```
+
+---
+
+## 🧭 Common commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the API and web application for development. |
+| `npm test` | Run the inventory-domain tests. |
+| `npm run build` | Build the React client and edge-worker bundle. |
+| `npm start` | Run the production server after a build. |
+| `git pull origin main` | Download the latest shared project changes. |
+
+---
+
+## 🛟 Troubleshooting
+
+**Port already in use**  
+Close another StockSense process, or start the server with a different API port:
+
+```bash
+PORT=8788 npm run dev
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:PORT=8788; npm run dev
+```
+
+**`npm install` fails**  
+Confirm that you are using a supported Node.js version, then remove the installed packages and install again:
+
+```bash
+rm -rf node_modules
+npm install
+```
+
+On Windows PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force node_modules
+npm install
+```
+
+**The application will not load**  
+Confirm that the terminal reports both the API server and Vite client are running, then visit http://localhost:5173 directly.
+
+---
+
+## 👥 Contribution workflow
+
+1. Pull the latest `main` branch.
+2. Create a branch for your work.
+3. Make and test your changes locally.
+4. Commit a clear description of the update.
+5. Push the branch and open a pull request.
+
+```bash
+git checkout -b your-change-name
+git add .
+git commit -m "Updated the project work"
+git push -u origin your-change-name
+```
+
+---
+
+Made for better stock control, clearer warehouse decisions, and calmer operations.
