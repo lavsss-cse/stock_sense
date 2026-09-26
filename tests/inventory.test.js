@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AppStateSchema } from '../src/domain.js';
+import { AppStateSchema, warehouseStaffCanProgress } from '../src/domain.js';
 import { InventoryError, saveOperation } from '../src/inventory.js';
 import { seedState } from '../src/store.js';
 
@@ -53,4 +53,12 @@ test('adjustment permits a physical count of zero', () => {
   const adjusted = saveOperation(seedState, operation({ type: 'adjustment', quantity: 0, sourceId: 'l1', destinationId: undefined, partner: undefined }), true);
   assert.equal(adjusted.balances.find((item) => item.productId === 'p1' && item.locationId === 'l1').quantity, 0);
   assert.equal(adjusted.movements[0].quantity, -77);
+});
+
+test('warehouse staff can mark delivery ready only after picked and packed are confirmed', () => {
+  assert.equal(warehouseStaffCanProgress('Warehouse Staff', { type: 'delivery', picked: false, packed: false }, 'Ready'), false);
+  assert.equal(warehouseStaffCanProgress('Warehouse Staff', { type: 'delivery', picked: true, packed: false }, 'Ready'), false);
+  assert.equal(warehouseStaffCanProgress('Warehouse Staff', { type: 'delivery', picked: true, packed: true }, 'Ready'), true);
+  assert.equal(warehouseStaffCanProgress('Warehouse Staff', { type: 'delivery', picked: true, packed: true }, 'Done'), false);
+  assert.equal(warehouseStaffCanProgress('Inventory Manager', { type: 'delivery', picked: true, packed: true }, 'Done'), true);
 });

@@ -127,13 +127,6 @@ export const LoginSchema = z.object({
 
 export const OtpRequestSchema = z.object({ email: z.email().max(254) });
 
-export function warehouseStaffCanProgress(role, operation, nextStatus) {
-  if (role !== 'Warehouse Staff') return true;
-  if (!operation || operation.type !== 'delivery') return false;
-  if (nextStatus === 'Ready') return Boolean(operation.picked) && Boolean(operation.packed);
-  return false;
-}
-
 export const StateEnvelopeSchema = z.object({
   state: AppStateSchema,
   revision: z.number().int().positive(),

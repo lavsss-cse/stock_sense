@@ -11,7 +11,7 @@ import {
   balanceAt, formatDate, loadState, locationLabel, productTotal, saveState, uid,
 } from './store.js';
 import { api, ApiError } from './api.js';
-import { AppStateSchema, warehouseStaffCanProgress } from './domain.js';
+import { AppStateSchema } from './domain.js';
 
 const PAGE_META = {
   dashboard: ['Overview', 'Dashboard', 'A clear view of your inventory, movements, and the work that needs attention.'],
@@ -122,7 +122,6 @@ function Login({ onLogin, theme, toggleTheme }) {
         <div className="login-options"><label className="checkbox"><input type="checkbox" defaultChecked />Keep me signed in</label><button type="button" className="text-btn" onClick={() => setAuthModal('reset')}>Forgot password?</button></div>
         <button className="btn primary full" disabled={loading}>{loading ? <><LoaderCircle className="spin" size={18} />Authenticating…</> : <>Sign in securely<ArrowRight size={18} /></>}</button>
         <div className="demo-account"><div><CircleUserRound size={19} /><span><strong>Inventory Manager demo</strong><small>manager@stocksense.demo · demo1234</small></span></div><button type="button" onClick={() => { setEmail('manager@stocksense.demo'); setPassword('demo1234'); }}>Use</button></div>
-        <div className="demo-account"><div><CircleUserRound size={19} /><span><strong>Warehouse Staff demo</strong><small>warehouse@stocksense.demo · demo1234</small></span></div><button type="button" onClick={() => { setEmail('warehouse@stocksense.demo'); setPassword('demo1234'); }}>Use</button></div>
         <p className="signup-copy">New to StockSense? <button type="button" className="text-btn" onClick={() => setAuthModal('signup')}>Create an account</button></p>
         <div className="security-note"><ShieldCheck size={16} />Protected session · No real credentials are transmitted in this prototype.</div>
       </form>
@@ -344,8 +343,8 @@ export default function App() {
       <footer className="app-footer"><span><i className={`status-dot ${backendOnline ? '' : 'offline'}`} />{backendOnline ? 'Cloud database connected · Synced just now' : 'Backend disconnected · Changes are not synced'}</span><span>INR · Asia/Kolkata · Production demo</span></footer>
     </div>
     {modal?.type === 'product' && <ProductModal state={state} setState={setState} product={modal.product} onClose={() => setModal(null)} notify={notify} />}
-    {modal?.type === 'operation' && <OperationModal state={state} submitOperation={submitOperation} operationType={modal.operationType} operation={modal.operation} onClose={() => setModal(null)} notify={notify} user={user} />}
-    {modal?.type === 'operationDetail' && <OperationDetail state={state} submitOperation={submitOperation} operation={modal.operation} onClose={() => setModal(null)} notify={notify} user={user} />}
+    {modal?.type === 'operation' && <OperationModal state={state} submitOperation={submitOperation} operationType={modal.operationType} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
+    {modal?.type === 'operationDetail' && <OperationDetail state={state} submitOperation={submitOperation} operation={modal.operation} onClose={() => setModal(null)} notify={notify} />}
     {modal?.type === 'warehouse' && <WarehouseModal state={state} setState={setState} warehouse={modal.warehouse} onClose={() => setModal(null)} notify={notify} />}
     {toast && <Toast toast={toast} clear={() => setToast(null)} />}
   </div>;
@@ -582,7 +581,7 @@ function WarehouseModal({ state, setState, warehouse, onClose, notify }) {
   return <Modal title={warehouse ? 'Edit warehouse' : 'Add a warehouse'} subtitle="Warehouses contain the locations where product stock is stored." onClose={onClose}><form className="form-stack" onSubmit={submit}><label>Warehouse name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. South Distribution Hub" autoFocus /></label><label>Short code<input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. SOUTH" /></label><label>Address or description<input required value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street, building, or area" /></label><label>Locations <small>(comma-separated)</small><textarea required rows="3" value={form.locations} onChange={(e) => setForm({ ...form, locations: e.target.value })} placeholder="Rack A, Rack B, Dispatch Zone" /></label><div className="modal-actions"><button type="button" className="btn secondary" onClick={onClose}>Cancel</button><button className="btn primary">Save warehouse</button></div></form></Modal>;
 }
 
-function OperationModal({ state, submitOperation, operationType, operation, onClose, notify, user }) {
+function OperationModal({ state, submitOperation, operationType, operation, onClose, notify }) {
   const meta = OPERATION_META[operationType];
   const defaultLocation = state.locations[0]?.id || '';
   const [form, setForm] = useState(operation || { productId: state.products[0]?.id || '', quantity: '', partner: '', sourceId: defaultLocation, destinationId: state.locations[1]?.id || defaultLocation, date: new Date().toISOString().slice(0, 10), note: '', picked: false, packed: false });
@@ -598,10 +597,6 @@ function OperationModal({ state, submitOperation, operationType, operation, onCl
     if (operationType === 'receipt' && !form.partner.trim()) { setError('Supplier is required for a receipt.'); return; }
     if (operationType === 'delivery' && !form.partner.trim()) { setError('Customer is required for a delivery.'); return; }
     if (operationType === 'delivery' && status === 'Done' && (!form.picked || !form.packed)) { setError('Confirm that the items are both picked and packed before validation.'); return; }
-    if (user?.role === 'Warehouse Staff' && !warehouseStaffCanProgress(user.role, { ...form, type: operationType }, status)) {
-      setError('Warehouse Staff can only mark picked + packed and move the delivery to Ready. Final stock validation stays with the Inventory Manager.');
-      return;
-    }
     const recordData = { ...form, id: operation?.id || uid(meta.prefix), type: operationType, quantity: Number(form.quantity), status, partner: form.partner?.trim(), note: form.note?.trim() };
     try {
       await submitOperation(recordData, status === 'Done');
@@ -619,25 +614,17 @@ function OperationModal({ state, submitOperation, operationType, operation, onCl
   </Modal>;
 }
 
-function OperationDetail({ state, submitOperation, operation, onClose, notify, user }) {
+function OperationDetail({ state, submitOperation, operation, onClose, notify }) {
   const [error, setError] = useState('');
   const current = state.operations.find((item) => item.id === operation.id) || operation;
   const product = state.products.find((item) => item.id === current.productId);
   async function setStatus(status) {
-    if (user?.role === 'Warehouse Staff' && !warehouseStaffCanProgress(user.role, current, status)) {
-      setError('Warehouse Staff can only move a delivery to Ready after both picked and packed are confirmed. Final validation remains manager-only.');
-      return;
-    }
     try {
       await submitOperation({ ...current, status }, false);
       notify('Status updated', `${current.id} is now ${status.toLowerCase()}.`); onClose();
     } catch (requestError) { setError(requestError.message || 'The status could not be changed.'); }
   }
   async function validate() {
-    if (user?.role === 'Warehouse Staff') {
-      setError('Only the Inventory Manager can complete final validation.');
-      return;
-    }
     try {
       await submitOperation({ ...current }, true);
       notify('Operation validated', `${current.id} changed stock and was added to Move History.`); onClose();

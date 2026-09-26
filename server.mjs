@@ -54,11 +54,13 @@ app.get('/api/health', (_request, response) => response.json({ status: 'ok', dat
 app.post('/api/auth/login', (request, response) => {
   const parsed = LoginSchema.safeParse(request.body);
   if (!parsed.success) return response.status(400).json({ message: zodMessage(parsed.error), details: parsed.error.flatten() });
+  const role = parsed.data.email.toLowerCase().includes('warehouse') ? 'Warehouse Staff' : 'Inventory Manager';
   const token = crypto.randomUUID();
   const createdAt = new Date();
   const expiresAt = new Date(createdAt.getTime() + 12 * 60 * 60 * 1000);
+  const displayName = role === 'Warehouse Staff' ? 'Nia Patel' : 'Maya Chen';
   db.prepare('INSERT INTO sessions (token, user_id, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(token, `local:${parsed.data.email}`, parsed.data.email.toLowerCase(), createdAt.toISOString(), expiresAt.toISOString());
-  response.json({ token, expiresAt: expiresAt.toISOString(), user: { name: 'Maya Chen', email: parsed.data.email, role: 'Inventory Manager', workspace: 'Arbor & Co.' } });
+  response.json({ token, expiresAt: expiresAt.toISOString(), user: { name: displayName, email: parsed.data.email, role, workspace: 'Arbor & Co.' } });
 });
 app.post('/api/auth/request-otp', (request, response) => {
   const parsed = OtpRequestSchema.safeParse(request.body);
