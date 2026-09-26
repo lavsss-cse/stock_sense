@@ -308,6 +308,7 @@ export default function App() {
   if (booting) return <BrandedLoader />;
   if (!authenticated) return <Login onLogin={login} theme={theme} toggleTheme={toggleTheme} />;
 
+  const isWarehouseStaff = user?.role === 'Warehouse Staff';
   const meta = PAGE_META[page];
   const unread = state.notifications.filter((item) => !item.read).length;
   const pendingOperations = state.operations.filter((item) => !['Done', 'Cancelled'].includes(item.status)).length;
@@ -319,7 +320,7 @@ export default function App() {
   const common = { state, setState, setModal, notify, submitOperation };
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to main content</a>
-    <Sidebar page={page} navigate={navigate} mobileNav={mobileNav} logout={logout} backendOnline={backendOnline} user={user} pendingOperations={pendingOperations} />
+    <Sidebar page={page} navigate={navigate} mobileNav={mobileNav} logout={logout} backendOnline={backendOnline} user={user} pendingOperations={pendingOperations} isWarehouseStaff={isWarehouseStaff} />
     {mobileNav && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
     <div className="app-main">
       <header className="topbar">
@@ -334,11 +335,11 @@ export default function App() {
         </div>
       </header>
       <main id="main-content" className="content">
-        {page === 'dashboard' && <Dashboard {...common} navigate={navigate} user={user} />}
-        {page === 'products' && <Products {...common} />}
+        {page === 'dashboard' && (isWarehouseStaff ? <WarehouseStaffDashboard {...common} navigate={navigate} user={user} /> : <Dashboard {...common} navigate={navigate} user={user} />)}
+        {!isWarehouseStaff && page === 'products' && <Products {...common} />}
         {page === 'operations' && <Operations {...common} />}
         {page === 'history' && <MoveHistory {...common} />}
-        {page === 'settings' && <SettingsPage {...common} theme={theme} toggleTheme={toggleTheme} resetWorkspace={resetWorkspace} />}
+        {!isWarehouseStaff && page === 'settings' && <SettingsPage {...common} theme={theme} toggleTheme={toggleTheme} resetWorkspace={resetWorkspace} />}
         {page === 'profile' && <ProfilePage logout={logout} theme={theme} toggleTheme={toggleTheme} notify={notify} user={user} setUser={setUser} />}
       </main>
       <footer className="app-footer"><span><i className={`status-dot ${backendOnline ? '' : 'offline'}`} />{backendOnline ? 'Cloud database connected · Synced just now' : 'Backend disconnected · Changes are not synced'}</span><span>INR · Asia/Kolkata · Production demo</span></footer>
@@ -351,8 +352,12 @@ export default function App() {
   </div>;
 }
 
-function Sidebar({ page, navigate, mobileNav, logout, backendOnline, user, pendingOperations }) {
-  const nav = [
+function Sidebar({ page, navigate, mobileNav, logout, backendOnline, user, pendingOperations, isWarehouseStaff }) {
+  const nav = isWarehouseStaff ? [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'operations', label: 'Deliveries', icon: ClipboardCheck },
+    { id: 'history', label: 'Move history', icon: History },
+  ] : [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'operations', label: 'Operations', icon: ClipboardCheck },
@@ -361,7 +366,7 @@ function Sidebar({ page, navigate, mobileNav, logout, backendOnline, user, pendi
   return <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
     <div className="sidebar-head"><Logo onClick={() => navigate('dashboard')} /><button className="sidebar-close" onClick={() => navigate(page)} aria-label="Close navigation"><X size={19} /></button></div>
     <button className="workspace-selector"><span>AC</span><div><small>Workspace</small><strong>{user.workspace || 'Arbor & Co.'}</strong></div><ChevronDown size={16} /></button>
-    <nav aria-label="Main navigation"><span className="nav-label">Workspace</span>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{label}</span>{id === 'operations' && pendingOperations > 0 && <Badge tone="sidebar">{pendingOperations}</Badge>}</button>)}<span className="nav-label spaced">Manage</span><button className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings size={19} /><span>Settings</span></button></nav>
+    <nav aria-label="Main navigation"><span className="nav-label">Workspace</span>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{label}</span>{id === 'operations' && pendingOperations > 0 && <Badge tone="sidebar">{pendingOperations}</Badge>}</button>)}{!isWarehouseStaff && <><span className="nav-label spaced">Manage</span><button className={page === 'settings' ? 'active' : ''} onClick={() => navigate('settings')}><Settings size={19} /><span>Settings</span></button></>}</nav>
     <div className="sidebar-status"><div><Database size={17} /><span><strong>{backendOnline ? 'Database live' : 'Backend offline'}</strong><small>{backendOnline ? 'D1 · synced moments ago' : 'Reconnect to save changes'}</small></span></div><span className={`pulse ${backendOnline ? '' : 'offline'}`} /></div>
     <div className="sidebar-profile"><button onClick={() => navigate('profile')}><span className="avatar">{(user.name || 'M C').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><span><strong>{user.name || 'Maya Chen'}</strong><small>{user.role || 'Inventory Manager'}</small></span><MoreHorizontal size={18} /></button><button className="logout-btn" onClick={logout}><LogOut size={17} /><span>Sign out</span></button></div>
   </aside>;
@@ -383,6 +388,52 @@ function MetricCard({ label, value, detail, icon: Icon, tone = 'green', onClick 
 
 function EmptyState({ icon: Icon = PackageOpen, title, body, action }) {
   return <div className="empty-state"><span><Icon size={26} /></span><h3>{title}</h3><p>{body}</p>{action}</div>;
+}
+
+function WarehouseStaffDashboard({ state, setModal, navigate, user }) {
+  const readyDeliveries = state.operations.filter((item) => item.type === 'delivery' && item.status === 'Ready').length;
+  const transfersAwaiting = state.operations.filter((item) => item.type === 'transfer' && !['Done', 'Cancelled'].includes(item.status)).length;
+  const putAwayJobs = state.operations.filter((item) => item.type === 'receipt' && !['Done', 'Cancelled'].includes(item.status)).length;
+  const countsDue = state.operations.filter((item) => item.type === 'adjustment' && !['Done', 'Cancelled'].includes(item.status)).length;
+  const lowStock = state.products.filter((product) => productTotal(state, product.id) <= Number(product.reorderLevel)).length;
+  const preparedForDispatch = state.operations.filter((item) => item.type === 'delivery' && item.status === 'Waiting' && item.picked && item.packed).length;
+  const recent = [...state.operations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+  return <div className="warehouse-dashboard">
+    <EditorialHeader category={dateLabel} title={`Warehouse view, ${(user.name || 'Nia').split(' ')[0]}.`} description="Pick, pack, transfer, and count stock with the current warehouse flow in front of you.">
+      <div className="warehouse-hero-actions">
+        <div className="warehouse-hero-badges">
+          <Badge tone="success" dot>Floor live</Badge>
+          <Badge tone="info" dot>{preparedForDispatch} dispatch ready</Badge>
+        </div>
+        <button className="btn primary" onClick={() => setModal({ type: 'operation', operationType: 'transfer' })}><Plus size={18} />New transfer</button>
+      </div>
+    </EditorialHeader>
+    <section className="warehouse-signal-strip" aria-label="Warehouse operations status">
+      <div><span>Pick / pack status</span><strong>{preparedForDispatch}</strong><small>Ready for consolidation</small></div>
+      <div><span>Dispatch hold</span><strong>{readyDeliveries}</strong><small>Waiting for clearance</small></div>
+      <div><span>Location scans</span><strong>{transfersAwaiting + countsDue}</strong><small>Active tasks this shift</small></div>
+    </section>
+    <section className="metrics-grid" aria-label="Warehouse staff metrics">
+      <MetricCard label="Ready deliveries" value={readyDeliveries} detail="Awaiting pick and pack" icon={PackageCheck} tone="green" onClick={() => navigate('operations')} />
+      <MetricCard label="Transfers in flight" value={transfersAwaiting} detail="Move stock between locations" icon={RefreshCw} tone="blue" onClick={() => navigate('operations')} />
+      <MetricCard label="Put-away jobs" value={putAwayJobs} detail="Shelving and receiving" icon={ArrowDownLeft} tone="amber" onClick={() => navigate('operations')} />
+      <MetricCard label="Stock counts" value={countsDue} detail="Cycle counts outstanding" icon={SlidersHorizontal} tone="violet" onClick={() => navigate('operations')} />
+      <MetricCard label="Low-stock items" value={lowStock} detail="Monitor location levels" icon={AlertTriangle} tone="red" onClick={() => navigate('products')} />
+    </section>
+    <div className="dashboard-grid">
+      <section className="panel recent-panel"><div className="panel-heading"><div><span className="eyebrow">Warehouse flow</span><h2>Live operations</h2></div><button className="text-btn" onClick={() => navigate('operations')}>View all <ArrowRight size={15} /></button></div>
+        <div className="table-wrap"><table><thead><tr><th>Reference</th><th>Type</th><th>Location / route</th><th>Status</th><th>Last update</th></tr></thead><tbody>{recent.map((item) => <tr key={item.id} onClick={() => setModal({ type: 'operationDetail', operation: item })}><td><strong className="mono">{item.id}</strong></td><td>{OPERATION_META[item.type].singular}</td><td>{item.partner || `${locationLabel(state, item.sourceId)} → ${locationLabel(state, item.destinationId)}`}</td><td><Badge tone={STATUS_TONE[item.status]} dot>{item.status}</Badge></td><td>{formatDate(item.date)}</td></tr>)}</tbody></table></div>
+      </section>
+      <aside className="dashboard-side">
+        <section className="panel quick-actions"><div className="panel-heading"><div><span className="eyebrow">Quick actions</span><h2>Warehouse tasks</h2></div></div><div>{[
+          { key: 'transfer', title: 'New transfer', body: 'Move stock to another rack or location', icon: RefreshCw },
+          { key: 'delivery', title: 'Ready dispatch', body: 'Pick, pack, and prepare dispatch', icon: PackageCheck },
+          { key: 'adjustment', title: 'Count stock', body: 'Reconcile a physical inventory count', icon: SlidersHorizontal },
+        ].map(({ key, title, body, icon: Icon }) => <button key={key} onClick={() => setModal({ type: 'operation', operationType: key })}><span className={key === 'delivery' ? 'green' : key === 'transfer' ? 'blue' : 'violet'}><Icon size={18} /></span><div><strong>{title}</strong><small>{body}</small></div><ChevronRight size={17} /></button>)}</div></section>
+      </aside>
+    </div>
+  </div>;
 }
 
 function Dashboard({ state, setModal, navigate, user }) {
